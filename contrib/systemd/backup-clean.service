@@ -1,0 +1,9 @@
+[Unit]
+Description=Periodic backup clean
+
+[Service]
+Type=oneshot
+ExecStart=/home/marc/bin/backup-clean
+
+[Install]
+WantedBy=multi-user.target

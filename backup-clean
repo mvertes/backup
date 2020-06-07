@@ -1,0 +1,76 @@
+#!/bin/sh
+# backup garbage collector
+# keep:
+#   1 backup per year the previous years
+hd=3600		# hour duration:  60s * 60
+h12=43200	# 12h
+dd=86400	# day duration:   hd * 24
+wd=604800	# week duration:  dd * 7
+md=2592000	# month duration: dd * 30
+yd=31557600	# year duration:  dd * 365.25
+
+now=$(date +'%Y%m%d_%H%M%S')
+
+#date2ts() { d=${1%_*} t=${1#*_}; date -d "$d${t%??}" +%s; }
+date2ts() {
+	t=$1; r=${t#????}; Y=${t%$r}
+	t=$r; r=${t#??}; m=${t%$r}
+	t=$r; r=${t#??}; d=${t%$r}
+	t=${r#_}; r=${t#??}; H=${t%$r}
+	t=$r; r=${t#??}; M=${t%$r}
+	S=${t#??}
+	date -d "$Y-$m-$d $H:$M:$S" +%s
+}
+
+ts2date() { date -d "@$1" +'%Y%m%d_%H%M%S'; }
+
+tsn=$(date2ts "$now")
+
+# minimal retention delay, according to backup age
+retention_delay() {
+	d=$((tsn - $1))
+	if [ $((d < h12)) = 1 ]; then
+		r=0	# keep all backups in the last 12 hours
+	elif [ $((d < dd)) = 1 ]; then
+		r=$hd	# keep 1 backup per hour in the last day
+	elif [ $((d < wd)) = 1 ]; then
+		r=$dd	# keep 1 backup per day in the last week
+	elif [ $((d < md)) = 1 ]; then
+		r=$wd	# keep 1 backup per week in the last month
+	elif [ $((d < yd)) = 1 ]; then
+		r=$md	# keep 1 backup per month in the last year
+	else
+		r=$yd	# keep 1 backup per year in the previous years
+	fi
+	echo $r
+}
+
+while getopts :nv opt; do
+	case $opt in
+	(n) optn=1 ;;
+	(v) optv=1 ;;
+	(*) echo "Usage: $0 [-nv] [dir]"; exit 1;
+	esac
+done
+shift $((OPTIND - 1))
+
+# sorted list of backups, most recent first
+dest=${1:-/.history}
+lbu=$(ls -rv "$dest")
+for d in $lbu; do
+	tsc=$(date2ts "$d")
+	if ! [ "$tsp" ]; then
+		[ "$optv" ] && echo "keep $dest/$d"
+		tsp=$tsc
+		continue
+	fi
+	mrd=$(retention_delay "$tsp")
+	dp=$((tsp - tsc))
+	if [ $((dp < mrd)) = 1 ]; then
+		[ "$optv" ] && echo "delete $dest/$d"
+		[ "$optn" ] || rm -rf "${dest:?}/$d"
+	else
+		[ "$optv" ] && echo "keep $dest/$d"
+		tsp=$tsc
+	fi
+done

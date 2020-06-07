@@ -1,0 +1,9 @@
+[Unit]
+Description=Periodic incremental backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/backup
+
+[Install]
+WantedBy=multi-user.target

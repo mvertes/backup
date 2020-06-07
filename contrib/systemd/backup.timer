@@ -1,0 +1,8 @@
+[Unit]
+Description=Backup every 30 minutes
+
+[Timer]
+OnCalendar=*-*-* *:05,35:00
+
+[Install]
+WantedBy=timers.target
