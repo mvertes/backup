@@ -1,0 +1,62 @@
+#!/bin/sh
+
+Version='diffdir-0.1'
+
+diffdir() {
+	[ -f "/etc/backup/ignore" ] && xf=--exclude-from=/etc/backup/ignore || xf=
+	rsync -aDSnivx "$xf" --delete "$2/" "$1" |
+	awk -v OptF="${OptF#./}" -v prefix="$prefix" '
+	NF == 0 {exit}
+	NR < 2 || /\/*\.dv$/ || /\/$/ {next}
+	# Match an itemized status for all versions of rsync -i
+	$1 !~ /^[<>ch.*][fdLDS+][.+?cstpoguaxz]+$/ {next}
+	{key = $1; file = substr($0, length(key) + 2)}
+	OptF && OptF != file {next}
+	key == "*deleting" {print "deleted " prefix file; next}
+	substr(key, 3, 7) == "+++++++" {print "created " prefix file; next}
+	{	# Avoid false positive if only mtime is changed.
+		of = "'"$1"'/" file; gsub("'\''", "'\'\\\\\'\''", of)
+		nf = "'"$2"'/" file; gsub("'\''", "'\'\\\\\'\''", nf)
+		if (substr(key, 2, 1) == "L") {	# Symlink
+			src = target = file
+			sub(/.* -> /, "", target);
+			sub(/ -> .*/, "", src);
+			"readlink '"$2"'/" src | getline otarget
+			if (target != otarget)
+				print "changed " src
+		} else if (system("cmp -s '\''" of "'\'\ \''" nf "'\''"))
+			print "changed " file
+	}'
+	# Or: scan key for file/link size, checksum or permission change
+	#     rsync -c is required
+	#key ~ /[cps]/ { print "changed " prefix file }'
+}
+
+last() {
+	i=0 m=0
+	case $1 in
+		([0-9]|[1-9][0-9]) m=$((m + $1)) ;;
+		("") ;;
+		(*) echo "$1"; return ;;
+	esac
+	for l in $vlist; do
+		[ $i -ge $m ] && break
+		i=$((i + 1))
+	done
+	echo "$dest/$l"
+}
+
+while getopts :V opt; do
+	case $opt in
+	(V) echo "$Version"; exit ;;
+	(*) echo "Usage: $0 [-V] old new"; exit 1 ;;
+	esac
+done
+shift $((OPTIND - 1))
+
+dest=/.history
+vlist=$(rsync --list-only "$dest/" 2>/dev/null | cut -b 47- | tac)
+
+old=$(last "$1") new=$(last "${2:-/}")
+echo "diffdir" "$old" "$new"
+diffdir "$old" "$new"

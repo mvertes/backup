@@ -1,18 +1,36 @@
 #!/bin/sh
+# Incremental backup using rsync(1).
 
-# incremental backup using rsync(1)
+[ "$USER" = root ] || exec sudo "$0" "$@"
 
-die() { echo "$0: fatal: $@" >&2; exit 1; }
+backup() {
+	date=$(date +%Y%m%d_%H%M%S)
+	last=$(rsync --list-only "$dest/" 2>/dev/null | cut -b 47- | tail -1)
 
-[ "$(id -u)" = 0 ] || die must run as root
+	case $last in
+	([12]*) opt_link=--link-dest=../$last;;
+	(*) opt_link=;;
+	esac
 
-dest=${1:-bip.local:/home/backup}/$(hostname)
-date=$(date +%Y%m%d_%H%M%S)
-last=$(rsync --list-only $dest/ 2>/dev/null | cut -b 47- | tail -1)
+	rsync -HSxa$optv --exclude-from=$ignore $opt_link / /boot "$dest/$date"
+}
 
-case $last in
-(2*) opt_link=--link-dest=../$last;;
-(*) opt_link=;;
+dest=/.history
+ignore=/etc/backup/ignore
+
+while getopts :d:i:nv opt; do
+	case $opt in
+	(d) dest="$OPTARG" ;;
+	(i) ignore="$OPTARG" ;;
+	(n|v) optv="$opt$optv" ;;
+	(*) echo "Usage: $0 [-nv] [-d [host:]dir] [clean|diff]"; exit 1 ;;
+	esac
+done
+shift $((OPTIND - 1))
+
+[ "$1" ] && cmd=$1 && shift || cmd=""
+case $cmd in
+(""|save) backup ;;
+(clean) exec backup-clean ${optv+-$optv} "$@" "$dest";;
+(diff) exec diffdir "$@";;
 esac
-
-rsync -DSHxav $opt_link / $dest/$date
