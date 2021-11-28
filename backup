@@ -1,8 +1,6 @@
 #!/bin/sh
 # Incremental backup using rsync(1).
 
-[ "$USER" = root ] || exec sudo "$0" "$@"
-
 backup() {
 	date=$(date +%Y%m%d_%H%M%S)
 	last=$(rsync --list-only "$dest/" 2>/dev/null | cut -b 47- | tail -1)
@@ -12,21 +10,25 @@ backup() {
 	(*) opt_link=;;
 	esac
 
-	rsync -HSxa$optv --exclude-from=$ignore $opt_link / /boot "$dest/$date"
+	rsync -HSxa$optv --exclude-from=$ignore $opt_link $volumes "$dest/$date"
 }
 
 dest=/.history
-ignore=/etc/backup/ignore
+ignore=/etc/backupignore
+volumes='/ /boot'
 
-while getopts :d:i:nv opt; do
+while getopts :d:i:nuv opt; do
 	case $opt in
 	(d) dest="$OPTARG" ;;
 	(i) ignore="$OPTARG" ;;
 	(n|v) optv="$opt$optv" ;;
-	(*) echo "Usage: $0 [-nv] [-d [host:]dir] [clean|diff]"; exit 1 ;;
+	(u) optu=1 volumes="$HOME" ignore="$HOME/.backupignore" ;;
+	(*) echo "Usage: $0 [-nuv] [-d [[user@]host:]dir] [clean|diff]"; exit 1 ;;
 	esac
 done
 shift $((OPTIND - 1))
+
+[ "$optu" ] || [ "$USER" = root ] || exec sudo "$0" "$@"
 
 [ "$1" ] && cmd=$1 && shift || cmd=""
 case $cmd in
