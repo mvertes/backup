@@ -3,7 +3,7 @@
 
 backup() {
 	date=$(date +%Y%m%d_%H%M%S)
-	last=$(rsync --list-only "$dest/" 2>/dev/null | cut -b 47- | tail -1)
+	last=$(rsync --list-only "$dest/" 2>/dev/null | awk '{r=$NF} END {print r}')
 
 	case $last in
 	([12]*) opt_link=--link-dest=../$last;;
