@@ -1,85 +1,62 @@
 #!/bin/sh
-# backup garbage collector
-[ "$USER" = root ] || exec sudo "$0" "$@"
 
-# Durations, in number of seconds.
-hd=3600	    # hour duration:  60s * 60
-h12=43200   # 12h: hd * 12
-dd=86400    # day duration:   hd * 24
-wd=604800   # week duration:  dd * 7
-md=2592000  # month duration: dd * 30
-yd=31557600 # year duration:  dd * 365.25
+usage() {
+	echo "Usage: $0 [-nv] [[[user@]host:]dir]
 
-now=$(date +'%Y%m%d_%H%M%S')
+$0 removes old backups and keeps:
+- backups for the current day
+- 1 backup per past day for the current month
+- 1 backup per past month for the current year
+- 1 backup per past year
 
-# The following works only for busybox date, not coreutils
-# Kept for reference only.
-#date2ts() { d=${1%_*} t=${1#*_}; date -d "$d${t%??}" +%s; }
+Options:
+-n  dry run
+-v  verbose
 
-# Convert date to timestamp, using date from GNU coreutils,
-# works also with busybox date.
-date2ts() {
-	t=$1; r=${t#????}; Y=${t%$r}   # Year (with century)
-	t=$r; r=${t#??}; m=${t%$r}     # Month
-	t=$r; r=${t#??}; d=${t%$r}     # Day
-	t=${r#_}; r=${t#??}; H=${t%$r} # Hour
-	t=$r; r=${t#??}; M=${t%$r}     # Minute
-	S=${t#??}                      # Second
-	date -d "$Y-$m-$d $H:$M:$S" +%s
-	#date -jf "%Y-%m-%d %H:%M:%S" "$Y-$m-$d $H:$M:$S" +%s  # BSD, MacOS (not tested)
+Environment variables:
+- BACKUP - backup directory"
 }
 
-ts2date() { date -d "@$1" +'%Y%m%d_%H%M%S'; }
-
-tsn=$(date2ts "$now")
-
-# Minimal retention delay in seconds, according to backup age,
-# implemented using POSIX shell arithmetic.
-retention_delay() {
-	d=$((tsn - $1))
-	if [ $((d < h12)) = 1 ]; then
-		r=0	# keep all backups in the last 12 hours
-	elif [ $((d < dd)) = 1 ]; then
-		r=$hd	# keep 1 backup per hour in the last day
-	elif [ $((d < wd)) = 1 ]; then
-		r=$dd	# keep 1 backup per day in the last week
-	elif [ $((d < md)) = 1 ]; then
-		r=$wd	# keep 1 backup per week in the last month
-	elif [ $((d < yd)) = 1 ]; then
-		r=$md	# keep 1 backup per month in the last year
-	else
-		r=$yd	# keep 1 backup per year in the previous years
-	fi
-	echo $r
-}
-
-dest=/.history
-while getopts :nd:v opt; do
+while getopts :nv opt; do
 	case $opt in
-	(d) dest=$OPTARG ;;
-	(n) optn=1 ;;
-	(v) optv=1 ;;
-	(*) echo "Usage: $0 [-nv] [-d dir]"; exit 1;
+	(n) optn=echo ;;
+	(v) optv=-t ;;
+	(*) usage; exit 1 ;;
 	esac
 done
-shift $((OPTIND - 1))
+shift $((OPTIND -1))
 
-# Sorted list of backups, most recent first.
-lbu=$(ls -rv "$dest")
-for d in $lbu; do
-	tsc=$(date2ts "$d")
-	if ! [ "$tsp" ]; then
-		[ "$optv" ] && echo "keep $dest/$d"
-		tsp=$tsc
-		continue
-	fi
-	mrd=$(retention_delay "$tsp")
-	dp=$((tsp - tsc))
-	if [ $((dp < mrd)) = 1 ]; then
-		[ "$optv" ] && echo "delete $dest/$d"
-		[ "$optn" ] || rm -rf "${dest:?}/$d"
-	else
-		[ "$optv" ] && echo "keep $dest/$d"
-		tsp=$tsc
-	fi
-done
+BACKUP=${1:-$BACKUP}
+[ "$BACKUP" ] || { usage; exit 1; }
+
+host=${BACKUP%:*} dir=${BACKUP#*:}
+ls='ls -r' rm="xargs -r $optv $optn rm -rf"
+[ "$host" = "$dir" ] || ls="ssh $host $ls" rm="ssh $host $rm"
+
+[ "$optv" ] && echo "# Cleaning backups on $BACKUP"
+
+$ls "$dir" |
+awk -v now=$(date +%Y-%m-%d) -v dir="$dir" '
+BEGIN {
+	yn = substr(now, 1, 4) # Year now
+	mn = substr(now, 6, 2) # Month now
+	dn = substr(now, 9, 2) # Day now
+}
+{
+	yb = substr($0, 1, 4)  # Year backup
+	mb = substr($0, 6, 2)  # Month backup
+	db = substr($0, 9, 2)  # Day backup
+	$0 = dir "/" $0
+
+	if (yb != yn) {
+		if (yb in yearly) print; else yearly[yb] = 1
+		next
+	}
+	if (mb != mn) {
+		if (mb in monthly) print; else monthly[mb] = 1
+		next
+	}
+	if (db != dn) {
+		if (db in dayly) print; else dayly[db] = 1
+	}
+}' | $rm

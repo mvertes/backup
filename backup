@@ -1,38 +1,47 @@
 #!/bin/sh
-# Incremental backup using rsync(1).
 
-backup() {
-	date=$(date +%Y%m%d_%H%M%S)
-	last=$(rsync --list-only "$dest/" 2>/dev/null | awk '{r=$NF} END {print r}')
+usage() {
+	echo "Usage: $0 [-nv] [[[user@]host]:dir]
 
-	case $last in
-	([12]*) opt_link=--link-dest=../$last;;
-	(*) opt_link=;;
-	esac
+Incremental backup using rsync(1). If run as root, a full system
+backup is performed. Otherwise, the user's home directory is backed.
 
-	rsync -HSxa$optv --exclude-from=$ignore $opt_link $volumes "$dest/$date"
+Options:
+-n	dry-run
+-v	verbose
+
+Files:
+- $HOME/.backupignore	exclude files from user backup (non root)
+- /etc/backupignore		exclude files from system backup (root)
+
+Environment:
+- BACKUP	backup directory"
 }
 
-dest=/.history
-ignore=/etc/backupignore
-volumes='/ /boot'
-
-while getopts :d:i:nuv opt; do
+while getopts :nv opt; do
 	case $opt in
-	(d) dest="$OPTARG" ;;
-	(i) ignore="$OPTARG" ;;
 	(n|v) optv="$opt$optv" ;;
-	(u) optu=1 volumes="$HOME" ignore="$HOME/.backupignore" ;;
-	(*) echo "Usage: $0 [-nuv] [-d [[user@]host:]dir] [clean|diff]"; exit 1 ;;
+	(*) usage; exit 1 ;;
 	esac
 done
 shift $((OPTIND - 1))
 
-[ "$optu" ] || [ "$USER" = root ] || exec sudo "$0" "$@"
+BACKUP=${1:-$BACKUP}
+[ "$BACKUP" ] || { usage; exit 1; }
 
-[ "$1" ] && cmd=$1 && shift || cmd=""
-case $cmd in
-(""|save) backup ;;
-(clean) exec backup-clean ${optv+-$optv} "$@" "$dest";;
-(diff) exec diffdir "$@";;
+[ "$USER" = root ] &&
+	ignore=/etc/backupignore volumes='/ /boot' ||
+	ignore="$HOME/.backupignore" volumes="$HOME"
+[ -f "$ignore" ] && ignore="--exclude-from=$ignore"
+
+last=$(rsync --list-only "$BACKUP/" 2>/dev/null | awk '{r=$NF} END {print r}')
+case $last in
+([12]*) opt_link=--link-dest=../$last;;
+(*) opt_link=;;
 esac
+
+date=$(date +%Y-%m-%d-%H%M%S)
+
+[ "$optv" ] && echo "# Backup $volumes to $BACKUP/$date"
+
+exec rsync -HSxa$optv $ignore $opt_link $volumes "$BACKUP/$date"
